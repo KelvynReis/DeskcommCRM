@@ -149,18 +149,32 @@ check "o gerador grava a tag do WAHA por arquitetura no .env.local" bash -c '
 mkdir -p "$TMP_DIR/bin"
 cat > "$TMP_DIR/bin/uname" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' "${FAKE_ARCH:-x86_64}"
+case "${1:-}" in
+  -s) printf '%s\n' "${FAKE_SO:-Linux}" ;;
+  *)  printf '%s\n' "${FAKE_ARCH:-x86_64}" ;;
+esac
 SH
-chmod +x "$TMP_DIR/bin/uname"
+# `hostname -I` é do Linux: o stub falha como no macOS, para o caminho do
+# `ipconfig` ser o que responde.
+cat > "$TMP_DIR/bin/hostname" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+cat > "$TMP_DIR/bin/ipconfig" <<'SH'
+#!/usr/bin/env bash
+[[ "${1:-}" == getifaddr ]] && printf '%s\n' "${FAKE_IP:-192.168.0.10}"
+SH
+chmod +x "$TMP_DIR/bin/uname" "$TMP_DIR/bin/hostname" "$TMP_DIR/bin/ipconfig"
 
 # As funções são extraídas por marcador, como a guarda do instalador acima: se
 # elas mudarem de forma, a extração sai incompleta e o teste avisa em vez de
 # medir um texto obsoleto.
 FUNCOES_WAHA="$TMP_DIR/waha-image-funcoes.sh"
-awk '/^(env_value|imagem_waha_para_esta_maquina|waha_so_amd64_conhecido|ensure_waha_image)\(\) \{/,/^\}/' \
+awk '/^(env_value|local_ip|imagem_waha_para_esta_maquina|waha_so_amd64_conhecido|ensure_waha_image|ensure_urls_na_lan)\(\) \{/,/^\}/' \
   "$ENVGEN" > "$FUNCOES_WAHA"
-check "a sonda extraiu a escolha do WAHA do gerador" \
-  bash -c 'grep -q noweb-arm "$1" && grep -q ensure_waha_image "$1"' _ "$FUNCOES_WAHA"
+check "a sonda extraiu as funções do gerador" \
+  bash -c 'grep -q noweb-arm "$1" && grep -q ensure_waha_image "$1" && grep -q ensure_urls_na_lan "$1"' \
+  _ "$FUNCOES_WAHA"
 
 for par in "arm64 devlikeapro/waha:noweb-arm-2026.7.2" \
            "aarch64 devlikeapro/waha:noweb-arm-2026.7.2" \
@@ -205,6 +219,33 @@ PLUS="$(ajustar_env 'DESKCOMM_ENV_MODE=local
 WAHA_IMAGE=devlikeapro/waha-plus:latest')"
 check "escolha explícita (WAHA Plus) não é trocada" \
   test "$(waha_de "$PLUS")" = devlikeapro/waha-plus:latest
+
+# No macOS o `hostname -I` não existe e o endereço caía em 127.0.0.1 — que
+# DENTRO do contêiner é o próprio contêiner (worker em crash-loop no 54322).
+# O IP da LAN é o que o navegador e os contêineres alcançam, e é o mesmo
+# critério que já vale na VM Linux.
+LAN="$(mktemp "$TMP_DIR/env.XXXXXX")"
+printf 'DESKCOMM_ENV_MODE=local\nNEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321\nSUPABASE_DB_URL=postgresql://127.0.0.1:54322/postgres\nWAHA_WEBHOOK_BASE_URL=http://localhost:3000\nAPP_PORT=3000\n' > "$LAN"
+FAKE_SO=Darwin FAKE_IP=192.168.0.10 PATH="$TMP_DIR/bin:$PATH" \
+  bash -c '. "$1"; ENV_FILE="$2"; ensure_urls_na_lan >/dev/null' _ "$FUNCOES_WAHA" "$LAN"
+check "no macOS a URL do Supabase sai do loopback para a LAN" \
+  grep -q '^NEXT_PUBLIC_SUPABASE_URL=http://192.168.0.10:54321$' "$LAN"
+check "no macOS a conexão do banco sai do loopback para a LAN" \
+  grep -q '^SUPABASE_DB_URL=postgresql://192.168.0.10:54322/postgres$' "$LAN"
+check "no macOS o endereço do webhook também sai do loopback" \
+  grep -q '^WAHA_WEBHOOK_BASE_URL=http://192.168.0.10:3000$' "$LAN"
+check "o que não é endereço não é tocado" grep -q '^APP_PORT=3000$' "$LAN"
+
+LINUX="$(mktemp "$TMP_DIR/env.XXXXXX")"
+printf 'DESKCOMM_ENV_MODE=local\nNEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321\n' > "$LINUX"
+FAKE_SO=Linux FAKE_IP=192.168.0.10 PATH="$TMP_DIR/bin:$PATH" \
+  bash -c '. "$1"; ENV_FILE="$2"; ensure_urls_na_lan >/dev/null' _ "$FUNCOES_WAHA" "$LINUX"
+check "fora do macOS o .env.local não é reescrito" \
+  grep -q '^NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321$' "$LINUX"
+
+check "local_ip devolve o IP da LAN quando o hostname -I não existe" \
+  test "$(FAKE_SO=Darwin FAKE_IP=192.168.0.10 PATH="$TMP_DIR/bin:$PATH" \
+    bash -c '. "$1"; local_ip' _ "$FUNCOES_WAHA")" = 192.168.0.10
 
 # Contrapeso contra divergência: o kit de produção responde o mesmo para a
 # mesma arquitetura. Se alguém bumpar uma tag só de um lado, este teste cai.
