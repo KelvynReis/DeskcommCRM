@@ -20,6 +20,63 @@ env_value() {
   awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE"
 }
 
+# O WAHA publica o engine NOWEB em tags distintas por arquitetura. A tag padrão
+# do compose (`latest-2026.7.2`) só existe em linux/amd64: num host ARM64 — Mac
+# Apple Silicon, VPS A1 — o `pull` morre com "no matching manifest for
+# linux/arm64/v8" e o `local:up` inteiro cai antes de subir o app. A regra é a
+# MESMA de `hostgator-setup-kit/_common.sh` (imagem_waha_padrao_para_host), e as
+# duas tags são a mesma versão funcional; `tests/shell/stack-local.test.sh`
+# compara as duas para elas não divergirem.
+imagem_waha_para_esta_maquina() {
+  case "$(uname -m 2>/dev/null || true)" in
+    aarch64|arm64) printf '%s' 'devlikeapro/waha:noweb-arm-2026.7.2' ;;
+    *)             printf '%s' 'devlikeapro/waha:latest-2026.7.2' ;;
+  esac
+}
+
+# Referências que sabidamente só têm linux/amd64 — as que o install.sh antigo
+# gravava (#1266), mais o default do compose. Qualquer outro valor é escolha de
+# quem desenvolve (WAHA Plus, tag própria) e não é da conta deste script.
+waha_so_amd64_conhecido() {
+  case "${1:-}" in
+    ""|devlikeapro/waha|devlikeapro/waha:latest|devlikeapro/waha:latest-2026.7.2) return 0 ;;
+  esac
+  return 1
+}
+
+# Quem já tem `.env.local` de antes desta variável existir recebe a tag SEM
+# regenerar o ambiente: regenerar trocaria portas, chaves e o pareamento da
+# sessão de WhatsApp. Só toca no vazio (preenche) e no WAHA amd64 conhecido em
+# host ARM64 — o mesmo critério do kit.
+ensure_waha_image() {
+  local esperada atual tmp
+  esperada="$(imagem_waha_para_esta_maquina)"
+  atual="$(env_value WAHA_IMAGE)"
+  [[ "$atual" == "$esperada" ]] && return 0
+  if [[ -n "$atual" ]]; then
+    case "$esperada" in
+      *noweb-arm-*) ;;
+      *) return 0 ;;
+    esac
+    waha_so_amd64_conhecido "$atual" || return 0
+  fi
+
+  tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
+  umask 077
+  if grep -q '^WAHA_IMAGE=' "$ENV_FILE"; then
+    awk -v imagem="$esperada" '/^WAHA_IMAGE=/ { print "WAHA_IMAGE=" imagem; next } { print }' \
+      "$ENV_FILE" > "$tmp"
+  else
+    {
+      cat "$ENV_FILE"
+      printf '\n# Tag do WAHA por arquitetura; ver scripts/local-env.sh.\nWAHA_IMAGE=%s\n' "$esperada"
+    } > "$tmp"
+  fi
+  mv "$tmp" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  printf 'WAHA_IMAGE ajustada para a arquitetura desta máquina: %s\n' "$esperada"
+}
+
 ensure_vapid_keys() {
   local public_key private_key keys_json
   public_key="$(env_value VAPID_PUBLIC_KEY)"
@@ -120,6 +177,7 @@ AI_CRED_AES_KEY=$(openssl rand -base64 32)
 NUVEMSHOP_OAUTH_ENCRYPTION_KEY=$(openssl rand -hex 32)
 
 WAHA_API_BASE_URL=http://waha:3000
+WAHA_IMAGE=$(imagem_waha_para_esta_maquina)
 WAHA_API_KEY=$waha_key
 WAHA_API_KEY_SHA512=$(printf '%s' "$waha_key" | sha512sum | awk '{print $1}')
 WAHA_HMAC_SECRET=$(openssl rand -hex 32)
@@ -143,6 +201,7 @@ case "${1:-ensure}" in
   ensure)
     if ! has_local_env; then generate; fi
     ensure_vapid_keys
+    ensure_waha_image
     ;;
   generate|force)
     generate

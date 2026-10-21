@@ -10,6 +10,7 @@ STACK="$ROOT_DIR/scripts/local-stack.sh"
 SUPA="$ROOT_DIR/scripts/local-supabase.sh"
 ENVGEN="$ROOT_DIR/scripts/local-env.sh"
 COMPOSE="$ROOT_DIR/docker-compose.local.yml"
+COMMON="$ROOT_DIR/hostgator-setup-kit/_common.sh"
 FAILS=0
 
 check() {
@@ -130,6 +131,90 @@ check "ambiente da NUVEM é copiado antes de ser substituído" test -s "$TMP_DIR
   eval "$(guarda)"
 ) >/dev/null 2>&1
 check "ambiente JÁ local não vira backup a cada run" bash -c '! test -e "$1/.env.local.cloud-backup"' _ "$TMP_DIR"
+
+# ── O WAHA da arquitetura desta máquina ────────────────────────────────────
+#
+# O índice de `latest-2026.7.2` só tem linux/amd64. Num Mac Apple Silicon ou
+# VPS ARM64 o `pull` morre com "no matching manifest for linux/arm64/v8" e o
+# `local:up` inteiro cai antes de subir o app. O compose aceita a tag por
+# variável e `local-env.sh` grava a nativa da máquina; a escolha tem que ser a
+# MESMA do kit de produção, senão as duas rotas divergem na primeira metade.
+check "o compose aceita a tag do WAHA por variável, com o padrão amd64" bash -c '
+  grep -qF "image: \${WAHA_IMAGE:-devlikeapro/waha:latest-2026.7.2}" "$1"' _ "$COMPOSE"
+check "o gerador grava a tag do WAHA por arquitetura no .env.local" bash -c '
+  grep -q "^WAHA_IMAGE=" "$1"' _ "$ENVGEN"
+
+# `uname -m` é o único sinal ligado ao host nas duas funções; o stub o troca
+# para provar cada arquitetura sem depender do runner.
+mkdir -p "$TMP_DIR/bin"
+cat > "$TMP_DIR/bin/uname" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${FAKE_ARCH:-x86_64}"
+SH
+chmod +x "$TMP_DIR/bin/uname"
+
+# As funções são extraídas por marcador, como a guarda do instalador acima: se
+# elas mudarem de forma, a extração sai incompleta e o teste avisa em vez de
+# medir um texto obsoleto.
+FUNCOES_WAHA="$TMP_DIR/waha-image-funcoes.sh"
+awk '/^(env_value|imagem_waha_para_esta_maquina|waha_so_amd64_conhecido|ensure_waha_image)\(\) \{/,/^\}/' \
+  "$ENVGEN" > "$FUNCOES_WAHA"
+check "a sonda extraiu a escolha do WAHA do gerador" \
+  bash -c 'grep -q noweb-arm "$1" && grep -q ensure_waha_image "$1"' _ "$FUNCOES_WAHA"
+
+for par in "arm64 devlikeapro/waha:noweb-arm-2026.7.2" \
+           "aarch64 devlikeapro/waha:noweb-arm-2026.7.2" \
+           "x86_64 devlikeapro/waha:latest-2026.7.2" \
+           "amd64 devlikeapro/waha:latest-2026.7.2"; do
+  arquitetura="${par%% *}"
+  esperada="${par#* }"
+  obtida="$(FAKE_ARCH="$arquitetura" PATH="$TMP_DIR/bin:$PATH" \
+    bash -c '. "$1"; imagem_waha_para_esta_maquina' _ "$FUNCOES_WAHA")"
+  check "local-env.sh: $arquitetura → $esperada" test "$obtida" = "$esperada"
+done
+
+# O comportamento do `ensure`, não só o da função pura: um `.env.local` que já
+# existe é CORRIGIDO sem regenerar o resto (portas, chaves, sessão pareada), e
+# uma escolha explícita de quem desenvolve não é atropelada.
+ajustar_env() {  # ajustar_env <conteúdo> → caminho do .env.local já ajustado em arm64
+  local arquivo
+  arquivo="$(mktemp "$TMP_DIR/env.XXXXXX")"
+  printf '%s\n' "$1" > "$arquivo"
+  FAKE_ARCH=arm64 PATH="$TMP_DIR/bin:$PATH" \
+    bash -c '. "$1"; ENV_FILE="$2"; ensure_waha_image >/dev/null' _ "$FUNCOES_WAHA" "$arquivo"
+  printf '%s' "$arquivo"
+}
+waha_de() {  # waha_de <arquivo> → valor de WAHA_IMAGE naquele .env.local
+  bash -c '. "$1"; ENV_FILE="$2"; env_value WAHA_IMAGE' _ "$FUNCOES_WAHA" "$1"
+}
+
+AMD64_EM_ARM="$(ajustar_env 'DESKCOMM_ENV_MODE=local
+WAHA_IMAGE=devlikeapro/waha:latest-2026.7.2')"
+check "WAHA amd64 conhecido num host arm64 vira a tag nativa" \
+  test "$(waha_de "$AMD64_EM_ARM")" = devlikeapro/waha:noweb-arm-2026.7.2
+check "a troca não duplica a variável" test "$(grep -c '^WAHA_IMAGE=' "$AMD64_EM_ARM")" = 1
+
+SEM_VARIAVEL="$(ajustar_env 'DESKCOMM_ENV_MODE=local
+APP_PORT=3000')"
+check ".env.local sem a variável recebe a tag da máquina" \
+  test "$(waha_de "$SEM_VARIAVEL")" = devlikeapro/waha:noweb-arm-2026.7.2
+check "o resto do .env.local fica intacto" \
+  grep -q '^APP_PORT=3000$' "$SEM_VARIAVEL"
+
+PLUS="$(ajustar_env 'DESKCOMM_ENV_MODE=local
+WAHA_IMAGE=devlikeapro/waha-plus:latest')"
+check "escolha explícita (WAHA Plus) não é trocada" \
+  test "$(waha_de "$PLUS")" = devlikeapro/waha-plus:latest
+
+# Contrapeso contra divergência: o kit de produção responde o mesmo para a
+# mesma arquitetura. Se alguém bumpar uma tag só de um lado, este teste cai.
+for arquitetura in arm64 x86_64; do
+  do_local="$(FAKE_ARCH="$arquitetura" PATH="$TMP_DIR/bin:$PATH" \
+    bash -c '. "$1"; imagem_waha_para_esta_maquina' _ "$FUNCOES_WAHA")"
+  do_kit="$(FAKE_ARCH="$arquitetura" PATH="$TMP_DIR/bin:$PATH" \
+    bash -c '. "$1"; imagem_waha_padrao_para_host' _ "$COMMON")"
+  check "a escolha de $arquitetura é a mesma do kit de produção" test "$do_local" = "$do_kit"
+done
 
 if [[ "$FAILS" -gt 0 ]]; then
   printf '\n%s verificação(ões) falharam\n' "$FAILS"
