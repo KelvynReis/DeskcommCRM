@@ -77,6 +77,36 @@ ensure_waha_image() {
   printf 'WAHA_IMAGE ajustada para a arquitetura desta máquina: %s\n' "$esperada"
 }
 
+# Um `.env.local` gerado no Mac antes disto ficou com as URLs em loopback, e
+# regenerar trocaria chaves, portas e o pareamento da sessão de WhatsApp. Aqui
+# só o ENDEREÇO muda — e só quando aponta para loopback, o valor que o
+# contêiner não alcança. O IP da LAN serve ao navegador e aos contêineres.
+ensure_urls_na_lan() {
+  [[ "$(uname -s 2>/dev/null)" == Darwin ]] || return 0
+  local ip tmp linha mudou=0
+  ip="$(local_ip)"
+  [[ -n "$ip" ]] || return 0
+  tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
+  umask 077
+  while IFS= read -r linha || [[ -n "$linha" ]]; do
+    # Só as chaves de ENDEREÇO, e só quando apontam para loopback.
+    if [[ "$linha" =~ ^(NEXT_PUBLIC_(SUPABASE_URL|APP_URL|ADMIN_URL)|SUPABASE_DB_URL|SUPABASE_DB_ADMIN_URL|WAHA_WEBHOOK_BASE_URL)= ]] &&
+      [[ "$linha" == *127.0.0.1* || "$linha" == *localhost* ]]; then
+      linha="${linha//127.0.0.1/$ip}"
+      linha="${linha//localhost/$ip}"
+      mudou=1
+    fi
+    printf '%s\n' "$linha"
+  done < "$ENV_FILE" > "$tmp"
+  if [[ "$mudou" == 1 ]]; then
+    mv "$tmp" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    printf 'Endereços locais trocados para a LAN (%s): contêiner não alcança o loopback do host.\n' "$ip"
+  else
+    rm -f "$tmp"
+  fi
+}
+
 ensure_vapid_keys() {
   local public_key private_key keys_json
   public_key="$(env_value VAPID_PUBLIC_KEY)"
@@ -104,7 +134,20 @@ has_local_env() {
 }
 
 local_ip() {
-  hostname -I 2>/dev/null | awk '{print $1}' || true
+  local ip iface
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  # `hostname -I` é do Linux. Num Mac ele não existe, o fallback antigo era
+  # 127.0.0.1, e loopback DENTRO do contêiner é o próprio contêiner: o app e o
+  # worker não alcançavam o Supabase do host (ECONNREFUSED 54322) e o `local:up`
+  # subia quebrado. O IP da LAN é o mesmo critério que já vale na VM Linux —
+  # serve ao navegador (host) e aos contêineres, que saem pela rede do Docker.
+  if [[ -z "$ip" ]] && command -v ipconfig >/dev/null 2>&1; then
+    for iface in en0 en1 en2; do
+      ip="$(ipconfig getifaddr "$iface" 2>/dev/null || true)"
+      [[ -n "$ip" ]] && break
+    done
+  fi
+  printf '%s' "$ip"
 }
 
 choose_port() {
@@ -202,6 +245,7 @@ case "${1:-ensure}" in
     if ! has_local_env; then generate; fi
     ensure_vapid_keys
     ensure_waha_image
+    ensure_urls_na_lan
     ;;
   generate|force)
     generate
