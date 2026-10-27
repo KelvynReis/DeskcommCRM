@@ -1,7 +1,13 @@
 import { InterfaceRefresh } from "@/hooks/auth/InterfaceRefresh";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { isMfaEnrolled, loadAuthUser, requiresMfa, resolveActiveOrg } from "@/lib/auth/server";
+import {
+  exigirProvaDeMfa,
+  isMfaEnrolled,
+  loadAuthUser,
+  requiresMfa,
+  resolveActiveOrg,
+} from "@/lib/auth/server";
 import { DEFAULT_VISIBILITY_MODE, roleAtLeast, type VisibilityMode } from "@/lib/auth/types";
 import { clientePelaAgendaLigado } from "@/lib/schemas/settings";
 import { AuthProvider } from "@/hooks/auth/AuthProvider";
@@ -16,6 +22,7 @@ import { marcaDaInstalacao } from "@/lib/branding/instalacao";
 import { resolverMarcaDaOrganizacao } from "@/lib/branding/organizacao";
 import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { modulosLigados } from "@/lib/instalacao/modulos";
 import { capacidadesLigadas } from "@/lib/organizacao/capacidades";
 import { ehOperante } from "@/lib/organizacao/operante";
@@ -24,6 +31,7 @@ import {
 } from "@/components/app/ImpersonateBanner";
 import { ConexaoCaidaBanner } from "@/components/app/ConexaoCaidaBanner";
 import { FaixaDaCobranca } from "@/components/cobranca/FaixaDaCobranca";
+import { FaixasDeCima } from "@/components/shell/FaixasDeCima";
 import { faixaDaCobranca, type FaixaDaCobranca as Faixa } from "@/lib/cobranca/faixa";
 import { logger } from "@/lib/logger";
 import { IdiomaProvider } from "@/lib/i18n/IdiomaProvider";
@@ -87,6 +95,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     const temaDaExtensao = lerCssDoTemaDaExtensao(admin, activeOrg.orgId);
 
     /**
+     * A faixa lê com a identidade da sessão, como GET /api/v1/channel-sessions,
+     * para respeitar a RLS em vez de atravessá-la com o cliente de serviço.
+     *
+     * A SELECT nativa de channel_sessions é por organização, com o acesso de
+     * plataforma previsto na policy. Ela não divide canais por atendente.
+     * O relato #3088 veio de uma instalação adaptada: esta passagem de cliente
+     * respeita uma restrição adicional se ela estiver na RLS. Um filtro local
+     * apenas na rota não é herdado por esta consulta direta do layout.
+     *
+     * Sem linhas visíveis, a lista fica vazia. Não acrescentamos uma regra de
+     * papel ou vínculo; a consulta abaixo mantém o filtro da organização ativa.
+     * createClient monta o cliente com os cookies, sem uma consulta extra aqui.
+     */
+    const daSessao = await createClient();
+
+    /**
      * As cinco consultas que TODA página de `/app` paga, disparadas juntas.
      *
      * Elas eram sequenciais e independentes: cada uma esperava a anterior sem
@@ -109,6 +133,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
      *    `tests/unit/faixa-de-conexao-caida-vem-do-seam.test.tsx`, que EXECUTA
      *    este layout — a cerca anterior lia o texto-fonte e reprovava esta
      *    refatoração sem que nada tivesse quebrado.
+     *  - QUEM enxerga o quê é decidido pelo cliente que o seam recebe
+     *    (`daSessao`, acima): a mesma RLS que a rota do seletor de canais
+     *    aplica. Vigiado por
+     *    `tests/unit/faixa-respeita-os-canais-do-atendente.test.tsx`.
      */
     const [orgRes, conexoes, isEnrolled, mfaRequired, modulos] = await Promise.all([
       admin
@@ -116,7 +144,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         .select("onboarded_at, status, settings, timezone")
         .eq("id", activeOrg.orgId)
         .maybeSingle(),
-      listarConexoesCaidas(admin, activeOrg.orgId),
+      listarConexoesCaidas(daSessao, activeOrg.orgId),
       isMfaEnrolled(),
       requiresMfa(
         activeOrg.role,
@@ -238,6 +266,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     needsMfaGate = mfaRequired;
   }
 
+  // Cadastrar e provar são perguntas diferentes: o `MfaEnrollGate` abaixo cuida
+  // de quem a política obriga a cadastrar; isto, de quem JÁ tem fator e ainda
+  // não o provou nesta sessão — com ou sem política.
+  await exigirProvaDeMfa();
+
   // Read sidebar collapsed state SSR to avoid flash.
   const store = await cookies();
   const collapsed = store.get("sidebar_collapsed")?.value === "1";
@@ -303,9 +336,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <div data-marca-org="" className="contents">
         <EstiloDaMarcaDaOrganizacao css={cssDaOrganizacao} />
         <EstiloDoTemaDaExtensao css={cssDoTemaDaExtensao} />
-        <ImpersonateBanner impersonating={impersonating} />
-        <ConexaoCaidaBanner caidas={conexoesCaidas} />
-        {faixa !== null && <FaixaDaCobranca faixa={faixa} fuso={orgFuso} />}
+        {/* As faixas medidas: a casca e o Inbox descontam a altura delas. */}
+        <FaixasDeCima>
+          <ImpersonateBanner impersonating={impersonating} />
+          <ConexaoCaidaBanner caidas={conexoesCaidas} />
+          {faixa !== null && <FaixaDaCobranca faixa={faixa} fuso={orgFuso} />}
+        </FaixasDeCima>
         {needsMfaGate ? (
           // Gate always mounted for MFA-required roles; it latches the blocking
           // decision client-side so the enroll Server Action's revalidation
