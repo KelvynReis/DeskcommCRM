@@ -38,8 +38,8 @@ import { LIMITE_FILTROS, LIMITE_LINHAS, LIMITE_RESPOSTA_BYTES } from "@/lib/exte
 import { ComoCriarAcesso } from "./ComoCriarAcesso";
 
 const MODOS_TLS = [
-  { valor: "require", rotulo: "Obrigatório (padrão)" },
   { valor: "verify-full", rotulo: "Verificar certificado e host" },
+  { valor: "require", rotulo: "Obrigatório (sem verificar certificado)" },
   { valor: "verify-ca", rotulo: "Verificar certificado" },
   { valor: "prefer", rotulo: "Preferir TLS" },
   { valor: "disable", rotulo: "Sem TLS (rede local confiável)" },
@@ -118,7 +118,7 @@ export function FormularioDeConexao({ open, onOpenChange, conexao }: Props) {
   // A senha nunca vem do servidor: ela não sai de lá. Em branco ao editar =
   // manter a guardada; vazia é recusada na criação.
   const [password, setPassword] = useState("");
-  const [sslMode, setSslMode] = useState<string>(conexao?.ssl_mode ?? "require");
+  const [sslMode, setSslMode] = useState<string>(conexao?.ssl_mode ?? "verify-full");
   const [enabled, setEnabled] = useState(conexao?.enabled ?? true);
   const [maxRows, setMaxRows] = useState(String(conexao?.max_rows ?? LIMITE_LINHAS.padrao));
   const [maxFilters, setMaxFilters] = useState(String(conexao?.max_filters ?? LIMITE_FILTROS.padrao));
@@ -371,6 +371,21 @@ export function FormularioDeConexao({ open, onOpenChange, conexao }: Props) {
                 ))}
               </SelectContent>
             </Select>
+            {(sslMode === "require" || sslMode === "prefer") && (
+              <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
+                {t("Este modo cifra a conexão, mas não verifica o certificado nem a identidade do servidor. Use apenas por compatibilidade.")}
+              </p>
+            )}
+            {sslMode === "disable" && (
+              <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
+                {t("Este modo envia os dados sem TLS. Use apenas em uma rede confiável.")}
+              </p>
+            )}
+            {sslMode === "verify-ca" && dbType === "mysql" && (
+              <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
+                {t("Este modo verifica o certificado, mas não confirma o host do servidor. Prefira verificar certificado e host.")}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center justify-between rounded-md border p-3">

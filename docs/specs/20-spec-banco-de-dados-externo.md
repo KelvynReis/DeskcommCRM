@@ -144,3 +144,17 @@ externos** avisa em destaque até a coluna ser escolhida. Fora do turno, nada mu
 - Sincronizar/importar tabelas externas para entidades do CRM.
 - Console SQL livre pelo operador.
 - Escrita no banco externo pelo DeskcommCRM.
+
+### Atualização KT-013 — TLS em novos cadastros
+
+Novas conexões usam `verify-full` por padrão no formulário, API e default SQL.
+Conexões existentes mantêm seu modo; `require`, `prefer` e `disable` continuam
+opções explícitas de compatibilidade e a tela avisa sobre a ausência de
+verificação de identidade ou de TLS. No MySQL, `verify-ca` verifica a cadeia,
+mas não o hostname; `verify-full` liga também `verifyIdentity` no driver.
+Nesse modo MySQL, use o hostname do certificado: IPs literais são recusados,
+pois o driver não os encaminha à verificação de identidade. Não há fallback
+automático para um modo menos seguro após falha no certificado.
+
+O default não instala CAs privadas. Servidores com certificado próprio precisam
+de uma cadeia confiável no runtime ou de uma escolha explícita de compatibilidade.

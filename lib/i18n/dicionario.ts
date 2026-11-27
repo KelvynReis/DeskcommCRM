@@ -16947,6 +16947,11 @@ export const DICIONARIO: Traducoes = {
   "site com problemas": { es: "sitio con problemas" },
   "sem sinais positivos": { es: "sin señales positivas" },
   "verificação pendente": { es: "verificación pendiente" },
+  "Obrigatório (sem verificar certificado)": { es: "Obligatorio (sin verificar el certificado)" },
+  "Este modo cifra a conexão, mas não verifica o certificado nem a identidade do servidor. Use apenas por compatibilidade.": { es: "Este modo cifra la conexión, pero no verifica el certificado ni la identidad del servidor. Úsalo solo por compatibilidad." },
+  "Este modo envia os dados sem TLS. Use apenas em uma rede confiável.": { es: "Este modo envía los datos sin TLS. Úsalo solo en una red de confianza." },
+  "Este modo verifica o certificado, mas não confirma o host do servidor. Prefira verificar certificado e host.": { es: "Este modo verifica el certificado, pero no confirma el host del servidor. Es preferible verificar el certificado y el host." },
+  "Não foi possível conferir o convite agora. Tente novamente em instantes.": { es: "No se pudo comprobar la invitación ahora. Inténtalo de nuevo en unos instantes." },
 };
 
 /**

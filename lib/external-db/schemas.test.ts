@@ -15,7 +15,7 @@ describe("criarConexaoSchema", () => {
   it("aplica defaults de porta, TLS, enabled e limites de leitura", () => {
     const r = criarConexaoSchema.parse(VALIDO);
     expect(r.port).toBe(5432);
-    expect(r.ssl_mode).toBe("require");
+    expect(r.ssl_mode).toBe("verify-full");
     expect(r.enabled).toBe(true);
     expect(r.max_rows).toBe(LIMITE_LINHAS.padrao);
     expect(r.max_filters).toBe(LIMITE_FILTROS.padrao);
@@ -56,6 +56,7 @@ describe("criarConexaoSchema", () => {
     expect(criarConexaoSchema.parse(VALIDO).db_type).toBe("postgres");
     expect(criarConexaoSchema.parse({ ...VALIDO, db_type: "postgres" }).db_type).toBe("postgres");
     expect(criarConexaoSchema.parse({ ...VALIDO, db_type: "mysql" }).db_type).toBe("mysql");
+    expect(criarConexaoSchema.parse({ ...VALIDO, db_type: "mysql" }).ssl_mode).toBe("verify-full");
     expect(() => criarConexaoSchema.parse({ ...VALIDO, db_type: "oracle" })).toThrow();
   });
 

@@ -17,11 +17,13 @@ const ROTULOS = {
   pendingLabel: "Confirmando…",
   failureLabel: "FALHA GENERICA",
   planLimitLabel: "LIMITE DO PLANO",
+  retryLabel: "TENTE NOVAMENTE",
 };
 
 describe("AcceptInviteForm", () => {
   it.each([
     ["limite_do_plano", "LIMITE DO PLANO"],
+    ["internal_error", "TENTE NOVAMENTE"],
     ["invalid_or_expired", "FALHA GENERICA"],
   ] as const)("recusa %s mostra a frase certa", async (error, esperado) => {
     vi.mocked(acceptInviteAction).mockResolvedValue({ ok: false, error });

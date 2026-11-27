@@ -55,12 +55,13 @@ export async function aplicarConvite(params: {
   const admin = createAdminClient();
 
   // Convite REVOGADO na tela de Equipe. Sem linha, segue — ver o cabeçalho.
-  const { data: linhaDoConvite } = await admin
+  const { data: linhaDoConvite, error: erroDoConvite } = await admin
     .from("team_invites")
     .select("revoked_at")
     .eq("id", payload.invite_id)
     .eq("organization_id", payload.organization_id)
     .maybeSingle();
+  if (erroDoConvite) return { ok: false, motivo: "internal_error" };
   if (linhaDoConvite?.revoked_at) return { ok: false, motivo: "invalid_or_expired" };
 
   // Org, papel e convidador vêm EXCLUSIVAMENTE do token assinado; o usuário,
