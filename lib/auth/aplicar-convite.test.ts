@@ -54,7 +54,7 @@ const rpcDoAceite = vi.fn(async () => ({ data: { id: "m1", changed: true }, erro
  * Dublê do admin client. `select` devolve a linha de `team_invites` pedida;
  * `update` (o fechamento do convite) aceita e não diz nada.
  */
-function adminComConvite(linha: { revoked_at: string | null } | null) {
+function adminComConvite(linha: { revoked_at: string | null } | null, error: { message: string } | null = null) {
   const cadeiaDeUpdate = () => {
     const c: Record<string, unknown> = {};
     for (const m of ["eq", "is"]) c[m] = () => c;
@@ -66,7 +66,7 @@ function adminComConvite(linha: { revoked_at: string | null } | null) {
       select: () => {
         const c: Record<string, unknown> = {};
         for (const m of ["eq", "is"]) c[m] = () => c;
-        c.maybeSingle = async () => ({ data: linha, error: null });
+        c.maybeSingle = async () => ({ data: linha, error });
         return c;
       },
       update: cadeiaDeUpdate,
@@ -114,6 +114,25 @@ describe("aplicarConvite consulta a LINHA, não só o token", () => {
     // `!linha || linha.revoked_at` e quebraria todo convite antigo, numa
     // instalação que não tem como reemitir o que já foi enviado.
     expect((await aplicar(null)).ok).toBe(true);
+  });
+
+  it("falha ao consultar a revogação é recuperável e não aceita nem fecha o convite", async () => {
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const { audit } = await import("@/lib/audit");
+    const { cookies } = await import("next/headers");
+    const admin = adminComConvite(null, { message: "consulta temporariamente indisponível" });
+    const from = vi.spyOn(admin, "from");
+    vi.mocked(createAdminClient).mockReturnValue(admin as never);
+
+    const { aplicarConvite } = await import("@/lib/auth/aplicar-convite");
+    expect(await aplicarConvite({ userId: USUARIO_ID, payload: PAYLOAD })).toEqual({
+      ok: false,
+      motivo: "internal_error",
+    });
+    expect(rpcDoAceite).not.toHaveBeenCalled();
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(audit).not.toHaveBeenCalled();
+    expect(cookies).not.toHaveBeenCalled();
   });
 
   it("a recusa da própria função do banco (42501) também não é vínculo", async () => {

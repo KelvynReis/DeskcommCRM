@@ -75,6 +75,7 @@ describe("POST /api/v1/external-db/connections", () => {
 
     expect(res.status).toBe(201);
     expect(inserido?.source_mode).toBe("list");
+    expect(inserido?.ssl_mode).toBe("verify-full");
     const evento = deps.audit.mock.calls[0]![0] as { metadata: Record<string, unknown> };
     expect(evento.metadata.source_mode).toBe("list");
   });

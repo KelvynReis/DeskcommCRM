@@ -83,7 +83,7 @@ export const criarConexaoSchema = z
     database_name: camposDeConexao.database_name,
     username: camposDeConexao.username,
     password: camposDeConexao.password,
-    ssl_mode: camposDeConexao.ssl_mode.default("require"),
+    ssl_mode: camposDeConexao.ssl_mode.default("verify-full"),
     enabled: camposDeConexao.enabled.default(true),
     max_rows: camposDeConexao.max_rows.default(LIMITE_LINHAS.padrao),
     max_filters: camposDeConexao.max_filters.default(LIMITE_FILTROS.padrao),

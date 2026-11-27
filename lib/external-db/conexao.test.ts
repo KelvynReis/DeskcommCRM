@@ -31,6 +31,15 @@ afterEach(async () => {
 });
 
 describe("obterPool — cache e invalidação", () => {
+  it.each([
+    ["disable", false],
+    ["prefer", { rejectUnauthorized: false }],
+    ["require", { rejectUnauthorized: false }],
+    ["verify-ca", { rejectUnauthorized: true }],
+    ["verify-full", { rejectUnauthorized: true }],
+  ] as const)("TLS %s mantém a configuração explícita", (sslMode, ssl) => {
+    expect(obterPool(conexao({ sslMode })).options.ssl).toEqual(ssl);
+  });
   it("reusa o MESMO pool para a mesma conexão", () => {
     expect(obterPool(conexao())).toBe(obterPool(conexao()));
   });

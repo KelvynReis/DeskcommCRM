@@ -17,6 +17,8 @@
  * do cliente (`LOAD DATA LOCAL`). Fatos do driver INFERIDOS (documentação): a
  * Fatia 4a-2b os mede num MySQL de verdade.
  */
+import { isIP } from "node:net";
+
 import mysql from "mysql2/promise";
 import type { PoolOptions } from "mysql2/promise";
 
@@ -60,13 +62,18 @@ function sslPara(modo: ModoTls): PoolOptions["ssl"] | undefined {
     case "require":
       return { rejectUnauthorized: false };
     case "verify-ca":
-    case "verify-full":
       return { rejectUnauthorized: true };
+    case "verify-full":
+      return { rejectUnauthorized: true, verifyIdentity: true };
   }
 }
 
 /** As opções do `mysql2` de uma conexão. Pura: é o que os testes conferem. */
 export function configMysql(c: ConexaoExterna): PoolOptions {
+  // mysql2 omite o host no handshake TLS quando recebe um IP literal.
+  if (c.sslMode === "verify-full" && isIP(c.host)) {
+    throw new Error("Para verificar certificado e host no MySQL, use o nome de host do certificado em vez de um endereço IP.");
+  }
   const ssl = sslPara(c.sslMode);
   return {
     host: c.host,

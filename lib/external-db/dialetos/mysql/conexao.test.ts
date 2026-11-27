@@ -89,8 +89,16 @@ describe("configMysql", () => {
     expect(configMysql(conexao({ sslMode: "prefer" })).ssl).toEqual({ rejectUnauthorized: false });
     expect(configMysql(conexao({ sslMode: "require" })).ssl).toEqual({ rejectUnauthorized: false });
     expect(configMysql(conexao({ sslMode: "verify-ca" })).ssl).toEqual({ rejectUnauthorized: true });
-    expect(configMysql(conexao({ sslMode: "verify-full" })).ssl).toEqual({ rejectUnauthorized: true });
+    expect(configMysql(conexao({ sslMode: "verify-full" })).ssl).toEqual({ rejectUnauthorized: true, verifyIdentity: true });
   });
+});
+
+it.each(["203.0.113.10", "2001:db8::10"])("verify-full recusa IP literal %s antes de conectar", async (host) => {
+  expect(() => configMysql(conexao({ host, sslMode: "verify-full" }))).toThrow("nome de host do certificado");
+  const resultado = await testarConexaoMysql(conexao({ host, sslMode: "verify-full" }));
+  expect(resultado.ok).toBe(false);
+  expect(criarConexao).not.toHaveBeenCalled();
+  expect(() => configMysql(conexao({ host, sslMode: "require" }))).not.toThrow();
 });
 
 describe("obterPoolMysql — cache e invalidação", () => {
